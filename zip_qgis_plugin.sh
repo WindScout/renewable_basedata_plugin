@@ -28,29 +28,29 @@ echo "Zipping qgis_plugin directory as of commit: ${LAST_COMMIT}"
 git archive --format=tar "${LAST_COMMIT}" "${PLUGIN_DIR}" | tar -x -C "${TEMP_DIR}"
 
 # Ensure credentials.json exists and is included in the plugin
-if [ -f "${PLUGIN_DIR}/ogc_layer_handler/credentials.json" ]; then
+if [ -f "${PLUGIN_DIR}/credentials.json" ]; then
     echo "Copying the current credentials.json file to the temporary directory"
-    mkdir -p "${TEMP_DIR}/${PLUGIN_DIR}/ogc_layer_handler"
-    cp "${PLUGIN_DIR}/ogc_layer_handler/credentials.json" "${TEMP_DIR}/${PLUGIN_DIR}/ogc_layer_handler/"
+    mkdir -p "${TEMP_DIR}/${PLUGIN_DIR}"
+    cp "${PLUGIN_DIR}/credentials.json" "${TEMP_DIR}/${PLUGIN_DIR}/"
 else
     echo "WARNING: credentials.json not found in the source directory"
     # Create a default credentials.json file
-    mkdir -p "${TEMP_DIR}/${PLUGIN_DIR}/ogc_layer_handler"
-    echo '{"organization":"myorg inc.", "api_key":"kwfbj234hdnoiq"}' > "${TEMP_DIR}/${PLUGIN_DIR}/ogc_layer_handler/credentials.json"
+    mkdir -p "${TEMP_DIR}/${PLUGIN_DIR}"
+    echo '{"organization":"myorg inc.", "api_key":"kwfbj234hdnoiq"}' > "${TEMP_DIR}/${PLUGIN_DIR}/credentials.json"
     echo "Created default credentials.json in the package"
 fi
 
 # Remove 'DEV' from name in metadata.txt
-if [ -f "${TEMP_DIR}/${PLUGIN_DIR}/ogc_layer_handler/metadata.txt" ]; then
+if [ -f "${TEMP_DIR}/${PLUGIN_DIR}/metadata.txt" ]; then
     echo "Removing 'DEV' string from metadata.txt name entry"
-    sed -i 's/name=WindScout Grunddaten Dienst DEV/name=WindScout Grunddaten Dienst/g' "${TEMP_DIR}/${PLUGIN_DIR}/ogc_layer_handler/metadata.txt"
+    sed -i 's/name=WindScout Grunddaten Dienst DEV/name=WindScout Grunddaten Dienst/g' "${TEMP_DIR}/${PLUGIN_DIR}/metadata.txt"
 fi
 
 # Create directory with new name
 mkdir -p "${TEMP_DIR}/${NEW_DIR_NAME}"
 
 # Copy the contents from ogc_layer_handler to the new directory
-cp -r "${TEMP_DIR}/${PLUGIN_DIR}/ogc_layer_handler/"* "${TEMP_DIR}/${NEW_DIR_NAME}/"
+cp -r "${TEMP_DIR}/${PLUGIN_DIR}/"* "${TEMP_DIR}/${NEW_DIR_NAME}/"
 
 # Create zip file directly from the new directory
 # This creates a zip that can be directly installed in QGIS
