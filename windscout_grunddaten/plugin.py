@@ -86,12 +86,25 @@ class MetadataHandler:
         Args:
             config_path: Path to the JSON configuration file
         """
-        self.config = None
+        self.config = {}
         self.credential_manager = None
         if config_path:
-            with open(config_path, 'r') as f:
-                self.config = json.load(f)
-        self.logger = logging.getLogger('qgis_plugin')
+            try:
+                with open(config_path, 'r') as f:
+                    self.config = json.load(f)
+                    self.logger = logging.getLogger('qgis_plugin')
+            except FileNotFoundError:
+                # Handle case when config file does not exist
+                self.logger = logging.getLogger('qgis_plugin')
+                self.logger.warning(f"Config file not found: {config_path}, using empty configuration")
+            except json.JSONDecodeError:
+                self.logger = logging.getLogger('qgis_plugin')
+                self.logger.warning(f"Invalid JSON in config file: {config_path}, using empty configuration")
+            except Exception as e:
+                self.logger = logging.getLogger('qgis_plugin')
+                self.logger.error(f"Error loading config file: {e}")
+        else:
+            self.logger = logging.getLogger('qgis_plugin')
 
     def set_credential_manager(self, credential_manager):
         """
@@ -113,8 +126,18 @@ class MetadataHandler:
             Dict: Metadata or None if request failed
         """
         try:
-            hostname = self.config.get('hostname', 'localhost')
-            port = self.config.get('port', 443)
+            # Get hostname and port from QgsSettings first, falling back to config
+            settings = QgsSettings()
+            hostname = settings.value("ogc_layer_handler/config_hostname")
+            port = settings.value("ogc_layer_handler/config_port")
+            
+            # If not found in settings, use values from config
+            if not hostname:
+                hostname = self.config.get('hostname', 'localhost')
+            
+            if not port:
+                port = self.config.get('port', 443)
+                
             if hostname in ['127.0.0.1', 'localhost']:
                 protocol = 'http'
             else:
@@ -180,8 +203,18 @@ class MetadataHandler:
             Dict: Metadata or None if request failed
         """
         try:
-            hostname = self.config.get('hostname', 'localhost')
-            port = self.config.get('port', 443)
+            # Get hostname and port from QgsSettings first, falling back to config
+            settings = QgsSettings()
+            hostname = settings.value("ogc_layer_handler/config_hostname")
+            port = settings.value("ogc_layer_handler/config_port")
+            
+            # If not found in settings, use values from config
+            if not hostname:
+                hostname = self.config.get('hostname', 'localhost')
+            
+            if not port:
+                port = self.config.get('port', 443)
+                
             proxy_path = service_config.get('proxy_path', '')
             if hostname in ['127.0.0.1', 'localhost']:
                 protocol = 'http'
@@ -252,7 +285,7 @@ class MetadataHandler:
             Dict: Metadata from config or None if not found
         """
         try:
-            if not self.config or 'services' not in self.config:
+            if not self.config or not isinstance(self.config, dict) or 'services' not in self.config:
                 return None
                 
             # Check in external services
@@ -1013,6 +1046,8 @@ class LayerHandler:
         self.config = self._load_config()
         self.style_lookup = self._build_style_lookup()
         self.credential_manager = None
+        
+        # Create MetadataHandler - the MetadataHandler will handle the case if the file doesn't exist
         self.metadata_handler = MetadataHandler(config_path)
         
         # Dictionary to store all created layers, organized by service_id and layer_id
@@ -1029,6 +1064,12 @@ class LayerHandler:
             with open(self.config_path, 'r') as f:
                 self.logger.info(f"Loading configuration from {self.config_path}")
                 return json.load(f)
+        except FileNotFoundError:
+            self.logger.warning(f"Config file not found: {self.config_path}, using empty configuration")
+            return {}
+        except json.JSONDecodeError:
+            self.logger.error(f"Invalid JSON in config file: {self.config_path}")
+            return {}
         except Exception as e:
             self.logger.error(f"Error loading config file: {e}")
             return {}
@@ -1246,9 +1287,24 @@ class LayerHandler:
             QgsVectorLayer or QgsRasterLayer: Created layer or None if creation failed
         """
         try:
-            hostname = self.config.get('hostname', 'localhost')
-            self.logger.info("hostname: " + hostname)
-            port = self.config.get('port', 443)
+            # Get hostname and port from QgsSettings first, falling back to config file if necessary
+            settings = QgsSettings()
+            hostname = settings.value("ogc_layer_handler/config_hostname")
+            port = settings.value("ogc_layer_handler/config_port")
+            
+            # If not found in settings, use values from config
+            if not hostname:
+                hostname = self.config.get('hostname', 'localhost')
+                self.logger.info(f"Using hostname from config file: {hostname}")
+            else:
+                self.logger.info(f"Using hostname from settings panel: {hostname}")
+                
+            if not port:
+                port = self.config.get('port', 443)
+                self.logger.info(f"Using port from config file: {port}")
+            else:
+                self.logger.info(f"Using port from settings panel: {port}")
+                
             self.logger.info(f"Creating layer with service_id: {service_id}, layer_id: {layer_id}")
 
             service_config = self.get_service_config(service_id)
@@ -1560,8 +1616,18 @@ class LayerHandler:
             Dict: Capabilities information or None if request failed
         """
         try:
-            hostname = self.config.get('hostname', 'localhost')
-            port = self.config.get('port', 443)
+            # Get hostname and port from QgsSettings first, falling back to config
+            settings = QgsSettings()
+            hostname = settings.value("ogc_layer_handler/config_hostname")
+            port = settings.value("ogc_layer_handler/config_port")
+            
+            # If not found in settings, use values from config
+            if not hostname:
+                hostname = self.config.get('hostname', 'localhost')
+            
+            if not port:
+                port = self.config.get('port', 443)
+                
             if hostname in ['127.0.0.1', 'localhost']:
                 protocol = 'http'
             else:
@@ -2076,6 +2142,46 @@ class QGISPlugin:
         #self.toolbar.addAction(self.load_server_styles_action)
         #self.toolbar.addAction(self.version_action)  # Add version to toolbar
 
+        # Initialize settings with defaults
+        settings = QgsSettings()
+        if not settings.contains("ogc_layer_handler/auto_load_styles"):
+            settings.setValue("ogc_layer_handler/auto_load_styles", True)
+        if not settings.contains("ogc_layer_handler/profiling_enabled"):
+            settings.setValue("ogc_layer_handler/profiling_enabled", False)
+        
+        # Check for config.json and create if it doesn't exist
+        config_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'config.json')
+        if not os.path.exists(config_path):
+            self.logger.info(f"No config.json found at {config_path}, creating minimal config")
+            
+            # Get hostname and port from settings or use defaults
+            hostname = settings.value("ogc_layer_handler/config_hostname", "localhost")
+            port = settings.value("ogc_layer_handler/config_port", "443")
+            
+            # Create a minimal configuration
+            minimal_config = {
+                "hostname": hostname,
+                "port": port,
+                "services": {
+                    "external_services": {},
+                    "internal_services": {}
+                },
+                "styles": {},
+                "layer_tree": []
+            }
+            
+            try:
+                # Ensure the directory exists
+                os.makedirs(os.path.dirname(config_path), exist_ok=True)
+                
+                # Write the config file
+                with open(config_path, 'w') as f:
+                    json.dump(minimal_config, indent=2, fp=f)
+                    
+                self.logger.info(f"Created minimal config.json at {config_path}")
+            except Exception as e:
+                self.logger.error(f"Error creating config.json: {str(e)}")
+
         self.credential_manager = CredentialManager(self.logger)
         
         if not self.credential_manager.has_credentials():
@@ -2106,7 +2212,6 @@ class QGISPlugin:
                 else:
                     self.logger.info(f"Loaded auth config: {auth_config_id}")
 
-
     def test_auth_config(self):
         """Test the authentication configuration by making a request to the server."""
         try:
@@ -2124,9 +2229,18 @@ class QGISPlugin:
                 return
             
             # Get hostname and port
+            settings = QgsSettings()
             hostname = self.get_config_hostname()
             if not hostname:
-                return
+                # If hostname is still not set, use a default value
+                hostname = "localhost"
+                settings.setValue("ogc_layer_handler/config_hostname", hostname)
+                self.logger.warning(f"No hostname configured. Using default: {hostname}")
+                self.iface.messageBar().pushMessage(
+                    "Warning", 
+                    f"No hostname configured. Using default: {hostname}", 
+                    level=Qgis.Warning
+                )
                 
             port = self.get_config_port()
             protocol = 'https'
@@ -2231,277 +2345,6 @@ class QGISPlugin:
             self.logger.error(f"Error testing authentication configuration: {str(e)}")
             self.logger.error(traceback.format_exc())
 
-    def load_layers(self):
-        """Load layers from configuration using QGIS authentication system."""
-        try:
-            # Check if layer filtering is enabled
-            settings = QgsSettings()
-            layer_filter = settings.value("ogc_layer_handler/layer_filter", "", type=str)
-            
-            # Create credential manager if not already created
-            if not self.credential_manager:
-                self.credential_manager = CredentialManager(self.logger)
-                
-            # Get authentication configuration ID
-            auth_config_id = self.credential_manager.get_auth_config_id()
-            
-            # Get hostname and port
-            hostname = self.get_config_hostname()
-            if not hostname:
-                return
-                
-            port = self.get_config_port()
-            protocol = 'https'
-            if hostname in ['localhost', '127.0.0.1']:
-                protocol = 'http'
-        
-            config_url = f"{protocol}://{hostname}:{port}/qgis_config"
-            self.logger.info(f"Attempting to load configuration from {config_url}")
-            
-            
-            # Create request
-            request = QNetworkRequest(QUrl(config_url))
-            
-            # Apply authentication if available
-            if auth_config_id:
-                auth_manager = QgsApplication.authManager()
-                auth_manager.updateNetworkRequest(request, auth_config_id)
-                self.logger.info(f"Applied auth config ID {auth_config_id} to config request")
-            else:
-                self.logger.warning("No authentication config available for config request")
-                
-            # Make blocking request
-            nam = QgsNetworkAccessManager.instance()
-            reply = nam.blockingGet(request)
-            
-            # Check response
-            if reply.error() == 0:  # QNetworkReply.NoError
-                # Save to temporary file
-                import tempfile
-                response_data = reply.content()
-                with tempfile.NamedTemporaryFile(delete=False, suffix='.json') as temp_file:
-                    temp_file.write(response_data)
-                    config_path = temp_file.name
-                self.logger.info(f"Successfully downloaded configuration to {config_path}")
-            else:
-                # Authentication required or other error
-                error_msg = reply.errorString()
-                self.logger.warning(f"Failed to download configuration: {error_msg}")
-                
-                if reply.error() == 401:  # QNetworkReply.AuthenticationRequiredError
-                    # Authentication required - prompt the user
-                    self.logger.warning("Authentication required to access configuration")
-                    if self.prompt_authentication():
-                        # Retry with new credentials
-                        auth_config_id = self.credential_manager.get_auth_config_id()
-                        if auth_config_id:
-                            # Create new request with updated auth
-                            new_request = QNetworkRequest(QUrl(config_url))
-                            auth_manager = QgsApplication.authManager()
-                            auth_manager.updateNetworkRequest(new_request, auth_config_id)
-                            new_reply = nam.blockingGet(new_request)
-                            
-                            if new_reply.error() == 0:
-                                # Save to temporary file
-                                response_data = new_reply.content()
-                                with tempfile.NamedTemporaryFile(delete=False, suffix='.json') as temp_file:
-                                    temp_file.write(response_data)
-                                    config_path = temp_file.name
-                                self.logger.info(f"Successfully downloaded configuration to {config_path}")
-                            else:
-                                self.logger.error(f"Retry failed: {new_reply.errorString()}")
-                        else:
-                            self.logger.error(f"No auth config available.")
-                    else:
-                        # User canceled - use local config
-                        self.logger.error(f"Authentication canceled. ")
-                else:
-                    self.logger.error(f"Auth falied")
-                
-        except Exception as e:
-            self.logger.error(f"Error accessing remote configuration: {str(e)}")
-            self.logger.error(traceback.format_exc())
-        
-        # Create layer handler
-        self.layer_handler = LayerHandler(config_path, self.logger)
-        
-        # Pass credential manager to layer handler
-        self.layer_handler.credential_manager = self.credential_manager
-        
-        # Set credential manager in metadata handler
-        self.layer_handler.metadata_handler.set_credential_manager(self.credential_manager)
-        
-        # Passing iface to LayerHandler if needed
-        self.layer_handler.iface = self.iface
-        
-        # Check for credentials
-        if not self.credential_manager.has_credentials():
-            if not self.prompt_authentication():
-                self.iface.messageBar().pushMessage(
-                    "Warning", 
-                    "No authentication credentials provided. Some layers may not load correctly.", 
-                    level=Qgis.Warning
-                )
-        
-        # Show message about layer filtering if enabled
-        if layer_filter:
-            filter_ids = [lid.strip() for lid in layer_filter.split(',')]
-            self.iface.messageBar().pushMessage(
-                "Layer Filter Active", 
-                f"Only loading layers with these IDs: {', '.join(filter_ids)}", 
-                level=Qgis.Info, 
-                duration=10  # Show for 10 seconds
-            )
-        
-        # Build layer tree and store loaded layers
-        self.layer_handler.build_layer_tree()
-        
-        # Store the loaded services for use in other methods
-        # Get the layers_by_id dictionary from the layer_handler
-        self.loaded_services = getattr(self.layer_handler, 'layers_by_id', {})
-        self.logger.info(f"Stored {len(self.loaded_services)} services in loaded_services dictionary")
-        
-        # Automatically load styles from server if enabled
-        settings = QgsSettings()
-        auto_load_styles = settings.value("ogc_layer_handler/auto_load_styles", True, type=bool)
-        
-        if auto_load_styles and self.loaded_services:
-            self.logger.info("Automatically loading styles from server...")
-            self.load_server_styles()
-        elif not auto_load_styles:
-            self.logger.info("Automatic style loading is disabled")
-        else:
-            self.logger.warning("No layers loaded, skipping automatic style loading")
-        
-    def get_config_hostname(self):
-        """Get hostname for configuration server.
-        
-        Returns:
-            str: Hostname for the configuration server
-        """
-        try:
-            settings = QgsSettings()
-            hostname = settings.value("ogc_layer_handler/config_hostname")
-            
-            # If no hostname is set, try to load from credentials file
-            if not hostname:
-                if not self.credential_manager:
-                    self.credential_manager = CredentialManager(self.logger)
-                self.credential_manager.load_preconfigured_credentials()
-                # Try reading again after loading credentials
-                hostname = settings.value("ogc_layer_handler/config_hostname")
-                
-            if not hostname:
-                self.logger.error("No hostname configured. Please check credentials.json or configure server settings.")
-                self.iface.messageBar().pushMessage(
-                    "Error", 
-                    "No hostname configured. Please check credentials.json or configure server settings.", 
-                    level=Qgis.Critical
-                )
-                
-            return hostname
-            
-        except Exception as e:
-            self.logger.error(f"Could not read hostname settings: {str(e)}")
-            self.iface.messageBar().pushMessage(
-                "Error", 
-                f"Could not read hostname settings: {str(e)}", 
-                level=Qgis.Critical
-            )
-            return None
-    
-    def get_config_port(self):
-        """Get port for configuration server.
-        
-        Returns:
-            str: Port for the configuration server
-        """
-        # Default to 443
-        port = "443"
-        
-        # Try to read from settings
-        try:
-            settings = QgsSettings()
-            port = settings.value("ogc_layer_handler/config_port", port)
-        except Exception as e:
-            self.logger.debug(f"Could not read settings: {str(e)}")
-        
-        return port
-
-    def prompt_authentication(self):
-        """
-        Prompt the user for API key authentication credentials.
-        
-        Returns:
-            bool: True if credentials were provided, False if canceled
-        """
-        # Create dialog
-        dialog = QDialog(self.iface.mainWindow())
-        dialog.setWindowTitle("OGC Server API Key Authentication")
-        
-        # Create layout
-        layout = QVBoxLayout()
-        
-        # Add explanation label
-        info_label = QLabel("API key authentication will be saved in the QGIS Authentication Database")
-        info_label.setWordWrap(True)
-        layout.addWidget(info_label)
-        
-        # Create form layout
-        form_layout = QFormLayout()
-        
-        # Get existing credentials
-        organization, api_key, save_key, _ = self.credential_manager.get_credentials()
-        
-        # Create fields
-        organization_input = QLineEdit(organization)
-        api_key_input = QLineEdit(api_key)
-        
-        # Save API key checkbox
-        save_key_checkbox = QCheckBox("Save API key in QGIS Auth Database")
-        save_key_checkbox.setChecked(save_key)
-        
-        # Add fields to form
-        form_layout.addRow("Organization:", organization_input)
-        form_layout.addRow("API Key:", api_key_input)
-        
-        # Add form and checkbox to layout
-        layout.addLayout(form_layout)
-        layout.addWidget(save_key_checkbox)
-        
-        # Create buttons
-        button_layout = QHBoxLayout()
-        ok_button = QPushButton("OK")
-        cancel_button = QPushButton("Cancel")
-        
-        # Connect buttons
-        ok_button.clicked.connect(dialog.accept)
-        cancel_button.clicked.connect(dialog.reject)
-        
-        # Add buttons to layout
-        button_layout.addWidget(ok_button)
-        button_layout.addWidget(cancel_button)
-        layout.addLayout(button_layout)
-        
-        # Set layout for dialog
-        dialog.setLayout(layout)
-        
-        # Show dialog
-        if dialog.exec_() == QDialog.Accepted:
-            # Get values from dialog
-            organization = organization_input.text()
-            api_key = api_key_input.text()
-            save_key = save_key_checkbox.isChecked()
-            
-            # Also directly save API key for direct HTTP testing
-            self.credential_manager.settings.setValue("ogc_layer_handler/api_key_cache", api_key)
-            
-            # Save credentials
-            self.credential_manager.save_credentials(organization, api_key, save_key)
-            
-            return True
-        
-        return False
     def configure_server(self):
         """Configure the server connection settings and API key authentication."""
         # Create a dialog
@@ -2519,7 +2362,7 @@ class QGISPlugin:
         server_form = QFormLayout()
         
         # Get existing settings
-        hostname = self.get_config_hostname()
+        hostname = self.get_config_hostname() or ""
         port = self.get_config_port()
         
         # Get auto-load styles setting
@@ -2613,6 +2456,7 @@ class QGISPlugin:
         profiling_checkbox = QCheckBox("Enable Performance Profiling")
         profiling_checkbox.setChecked(profiling_enabled)
         server_form.addRow("Profiling:", profiling_checkbox)
+        
         # Connect buttons
         def save_settings():
             try:
@@ -2643,397 +2487,391 @@ class QGISPlugin:
         # Show the dialog
         dialog.exec_()
 
-    def refresh_layers(self):
-        """Refresh all loaded layers."""
+    def get_config_hostname(self):
+        """Get hostname for configuration server.
+        
+        Returns:
+            str: Hostname for the configuration server or None if not found
+        """
         try:
-            if self.layer_handler:
-                # Simply reload for now
-                self.load_layers()
-            else:
-                self.load_layers()
+            settings = QgsSettings()
+            hostname = settings.value("ogc_layer_handler/config_hostname")
+            
+            # If no hostname is set, try to load from credentials file
+            if not hostname:
+                if not self.credential_manager:
+                    self.credential_manager = CredentialManager(self.logger)
+                self.credential_manager.load_preconfigured_credentials()
+                # Try reading again after loading credentials
+                hostname = settings.value("ogc_layer_handler/config_hostname")
+                
+            return hostname
         except Exception as e:
-            self.iface.messageBar().pushMessage(
-                "Error", 
-                f"Failed to refresh layers: {str(e)}", 
-                level=Qgis.Critical
-            )
-
-
-    # def check_tinyows(self):
-    #     """
-    #     Check TinyOWS capabilities and show in message bar using QGIS authentication system.
-    #     """
-    #     try:
-    #         if not self.layer_handler:
-    #             config_path = os.path.join(os.path.dirname(__file__), 'c.yaml')
-    #             self.layer_handler = LayerHandler(config_path, self.logger)
+            self.logger.error(f"Error getting hostname: {str(e)}")
+            return None
             
-    #         # Create credential manager if not already created
-    #         if not self.credential_manager:
-    #             self.credential_manager = CredentialManager(self.logger)
-                
-    #         # Pass credential manager to layer handler
-    #         self.layer_handler.credential_manager = self.credential_manager
-            
-    #         # Passing iface to LayerHandler if needed
-    #         self.layer_handler.iface = self.iface
-            
-    #         # Check for credentials
-    #         if not self.credential_manager.has_credentials():
-    #             if not self.prompt_authentication():
-    #                 self.iface.messageBar().pushMessage(
-    #                     "Warning", 
-    #                     "No authentication credentials provided. Service check may fail.", 
-    #                     level=Qgis.Warning
-    #                 )
-    #                 return
-            
-    #         # Get hostname and port
-    #         hostname = self.get_config_hostname()
-    #         port = self.get_config_port()
-            
-    #         # Get authentication configuration ID
-    #         auth_config_id = self.credential_manager.get_auth_config_id()
-            
-    #         # Capabilities URL for TinyOWS
-    #         capabilities_url = f"http://{hostname}:{port}/tinyows?service=WFS&version=1.1.0&request=GetCapabilities"
-            
-    #         self.logger.info(f"Testing TinyOWS capabilities with QGIS auth system: {capabilities_url}")
-            
-    #         from qgis.PyQt.QtNetwork import QNetworkRequest
-            
-    #         # Create request
-    #         request = QNetworkRequest(QUrl(capabilities_url))
-            
-    #         # Apply authentication if available
-    #         if auth_config_id:
-    #             auth_manager = QgsApplication.authManager()
-    #             auth_manager.updateNetworkRequest(request, auth_config_id)
-    #             self.logger.info(f"Applied auth config ID {auth_config_id} to capabilities request")
-            
-    #         # Make blocking request
-    #         nam = QgsNetworkAccessManager.instance()
-    #         reply = nam.blockingGet(request)
-            
-    #         if reply.error() == 0:  # No error
-    #             response_text = reply.content().data().decode('utf-8')
-    #             response_size = len(response_text)
-                
-    #             self.iface.messageBar().pushMessage(
-    #                 "Success", 
-    #                 f"Authentication successful! Response size: {response_size} bytes", 
-    #                 level=Qgis.Success
-    #             )
-                
-    #             # Count layers
-    #             import re
-    #             feature_types = re.findall(r"<Name>([^<]+)</Name>", response_text)
-    #             if feature_types:
-    #                 self.logger.info(f"Found {len(feature_types)} layers in TinyOWS")
-    #                 self.iface.messageBar().pushMessage(
-    #                     "Info", 
-    #                     f"Found {len(feature_types)} TinyOWS layers", 
-    #                     level=Qgis.Info
-    #                 )
-    #         else:
-    #             self.iface.messageBar().pushMessage(
-    #                 "Error", 
-    #                 f"Authentication failed! Error: {reply.errorString()}", 
-    #                 level=Qgis.Critical
-    #             )
-    #             self.logger.error(f"Authentication failed! Error: {reply.errorString()}")
-                
-    #     except Exception as e:
-    #         self.iface.messageBar().pushMessage(
-    #             "Error", 
-    #             f"Error checking TinyOWS: {str(e)}", 
-    #             level=Qgis.Critical
-    #         )
-    #         self.logger.error(f"Error checking TinyOWS: {str(e)}")
-    #         self.logger.error(traceback.format_exc())
-
-    def unload(self):
-        """Removes the plugin menu and icon from QGIS GUI."""
+    def get_config_port(self):
+        """Get port for configuration server.
+        
+        Returns:
+            str: Port for the configuration server
+        """
         try:
-            # Remove all menu items
-            menu = self.iface.webMenu()
-            for action in menu.actions():
-                if action.text() == self.title or action.text() == f'&{self.title}':
-                    menu.removeAction(action)
-                    action.deleteLater()
-
-            # Remove toolbar and its actions
-            if hasattr(self, 'toolbar'):
-                for action in self.toolbar.actions():
-                    self.toolbar.removeAction(action)
-                    action.deleteLater()
-                self.iface.mainWindow().removeToolBar(self.toolbar)
-                self.toolbar.deleteLater()
-                
-            # Clean up any remaining references
-            self.load_action = None
-            self.configure_action = None
-            self.test_auth_action = None
-            self.export_styles_action = None
-            self.import_styles_action = None
-            self.load_server_styles_action = None
-            self.version_action = None  # Clean up version action
-            self.toolbar = None
+            settings = QgsSettings()
+            port = settings.value("ogc_layer_handler/config_port")
             
+            # If no port is set, use a default based on the hostname
+            if not port:
+                hostname = self.get_config_hostname()
+                # Use standard port 443 for external hosts, 80 for localhost
+                if hostname and hostname not in ['localhost', '127.0.0.1']:
+                    port = "443"
+                else:
+                    port = "80"
+                    
+                # Save the default
+                settings.setValue("ogc_layer_handler/config_port", port)
+                self.logger.info(f"No port configured. Using default: {port}")
+                
+            return port
         except Exception as e:
-            self.logger.error(f"Error during plugin unload: {str(e)}")
-            self.logger.error(traceback.format_exc())
-
+            self.logger.error(f"Error getting port: {str(e)}")
+            return "80"  # Default fallback
+            
     def export_styles(self):
-        """Export styles for all plugin-provided layers to a JSON file."""
+        """Export all layer styles to a JSON file"""
         try:
-            # Check if layers are loaded
-            if not self.layer_handler or not hasattr(self.layer_handler, 'layers_by_id') or not self.layer_handler.layers_by_id:
-                self.iface.messageBar().pushMessage(
-                    "Warning", 
-                    "No layers loaded. Please load layers first.", 
-                    level=Qgis.Warning
-                )
-                return
+            # Create FileDialog to select destination
+            file_dialog = QFileDialog()
+            file_dialog.setAcceptMode(QFileDialog.AcceptSave)
+            file_dialog.setNameFilter("JSON Files (*.json)")
+            file_dialog.setDefaultSuffix("json")
+            file_dialog.setWindowTitle("Export Layer Styles")
             
-            # Get export file path
-            file_path, _ = QFileDialog.getSaveFileName(
-                self.iface.mainWindow(),
-                "Export Layer Styles",
-                "",
-                "JSON Files (*.json)"
-            )
+            # Set a default filename based on current date
+            timestamp = datetime.now().strftime("%Y%m%d")
+            file_dialog.selectFile(f"qgis_styles_{timestamp}.json")
             
-            if not file_path:
-                return  # User cancelled
+            # Show the dialog to select destination path
+            if file_dialog.exec_():
+                # Get selected file path
+                filepath = file_dialog.selectedFiles()[0]
                 
-            # Add .json extension if missing
-            if not file_path.lower().endswith('.json'):
-                file_path += '.json'
-            
-            # Export styles
-            success = self.style_manager.export_styles_to_file(self.layer_handler.layers_by_id, file_path)
-            
-            if success:
-                self.iface.messageBar().pushMessage(
-                    "Success", 
-                    f"Layer styles exported to {file_path}", 
-                    level=Qgis.Success
-                )
-            else:
-                self.iface.messageBar().pushMessage(
-                    "Error", 
-                    "Failed to export layer styles", 
-                    level=Qgis.Critical
-                )
+                # Export styles
+                success = self.style_manager.export_styles_to_file(self.loaded_services, filepath)
                 
+                if success:
+                    self.iface.messageBar().pushMessage(
+                        "Success",
+                        f"Styles exported to {filepath}",
+                        level=Qgis.Success
+                    )
+                else:
+                    self.iface.messageBar().pushMessage(
+                        "Error",
+                        "Failed to export styles",
+                        level=Qgis.Critical
+                    )
         except Exception as e:
             self.logger.error(f"Error exporting styles: {str(e)}")
             self.logger.error(traceback.format_exc())
             self.iface.messageBar().pushMessage(
-                "Error", 
-                f"Error exporting styles: {str(e)}", 
+                "Error",
+                f"Error exporting styles: {str(e)}",
                 level=Qgis.Critical
-            )    
+            )
+            
     def import_styles(self):
-        """Import styles from a JSON file and apply to plugin-provided layers."""
+        """Import layer styles from a JSON file"""
         try:
             # Check if layers are loaded
-            if not self.layer_handler or not hasattr(self.layer_handler, 'layers_by_id') or not self.layer_handler.layers_by_id:
+            if not self.loaded_services:
                 self.iface.messageBar().pushMessage(
-                    "Warning", 
-                    "No layers loaded. Please load layers first.", 
+                    "Warning",
+                    "No layers loaded. Please load layers first.",
                     level=Qgis.Warning
                 )
                 return
+                
+            # Create FileDialog to select source file
+            file_dialog = QFileDialog()
+            file_dialog.setAcceptMode(QFileDialog.AcceptOpen)
+            file_dialog.setNameFilter("JSON Files (*.json)")
+            file_dialog.setWindowTitle("Import Layer Styles")
             
-            # Get import file path
-            file_path, _ = QFileDialog.getOpenFileName(
-                self.iface.mainWindow(),
-                "Import Layer Styles",
-                "",
-                "JSON Files (*.json)"
-            )
-            
-            if not file_path:
-                return  # User cancelled
-            
-            # Import styles
-            success_count, fail_count = self.style_manager.import_styles_from_file(
-                self.layer_handler.layers_by_id, 
-                file_path
-            )
-            
-            if success_count > 0:
+            # Show the dialog to select source file
+            if file_dialog.exec_():
+                # Get selected file path
+                filepath = file_dialog.selectedFiles()[0]
+                
+                # Import styles with progress dialog
                 self.iface.messageBar().pushMessage(
-                    "Success", 
-                    f"Applied {success_count} layer styles successfully. Failed: {fail_count}", 
-                    level=Qgis.Success
+                    "Info",
+                    "Importing styles... Please wait",
+                    level=Qgis.Info
                 )
-            else:
-                self.iface.messageBar().pushMessage(
-                    "Warning", 
-                    f"No styles applied. Failed attempts: {fail_count}", 
-                    level=Qgis.Warning
+                QgsApplication.processEvents()  # Keep UI responsive
+                
+                # Import styles
+                success_count, fail_count = self.style_manager.import_styles_from_file(
+                    self.loaded_services, filepath
                 )
                 
+                self.iface.messageBar().pushMessage(
+                    "Success",
+                    f"Styles imported: {success_count} success, {fail_count} failed",
+                    level=Qgis.Success if fail_count == 0 else Qgis.Warning
+                )
         except Exception as e:
             self.logger.error(f"Error importing styles: {str(e)}")
             self.logger.error(traceback.format_exc())
             self.iface.messageBar().pushMessage(
-                "Error", 
-                f"Error importing styles: {str(e)}", 
+                "Error",
+                f"Error importing styles: {str(e)}",
                 level=Qgis.Critical
             )
-    
+            
     def load_server_styles(self):
-        """
-        Fetch styles from server and apply to layers.
-        """
-        # Check if layers are loaded
-        if not self.loaded_services:
-            self.style_manager.logger.warning("No layers loaded. Load layers first.")
-            QMessageBox.warning(None, "No Layers Loaded", "You need to load layers first before applying styles.")
-            return
-        
-        # Check if credentials are available
-        if not self.credential_manager.has_credentials():
-            self.style_manager.logger.warning("No API keys available. Cannot fetch styles.")
-            QMessageBox.warning(None, "No API Keys", "You need to set API keys in settings before loading server styles.")
-            return
-            
-        # Debug: Log information about loaded layers structure
-        self.style_manager.logger.info("=== DEBUGGING LOADED LAYERS ===")
-        for service_id, layers in self.loaded_services.items():
-            self.style_manager.logger.info(f"Service: {service_id}, has {len(layers)} layers")
-            for layer_id, layer in layers.items():
-                layer_type = "Vector" if isinstance(layer, QgsVectorLayer) else "Raster" if isinstance(layer, QgsRasterLayer) else "Unknown"
-                # Get the actual layer ID that QGIS uses internally
-                qgis_id = layer.id() if hasattr(layer, "id") else "No ID"
-                self.style_manager.logger.info(f"  Layer ID in plugin: '{layer_id}', QGIS internal ID: '{qgis_id}', Type: {layer_type}")
-        
-        # Try to fetch and apply styles
+        """Load styles from server for all loaded layers"""
         try:
-            # Get base API URL
-            base_url = self.style_manager.get_api_url()
-            styles_url = f"{base_url}/styles"
-            
-            # Get authentication headers
-            auth_headers = self.credential_manager.get_auth_header() if self.credential_manager.has_credentials() else {}
-            
-            # Debug: Log the URL and headers being used (remove sensitive info)
-            self.style_manager.logger.info(f"Fetching styles from: {styles_url}")
-            debug_headers = {k: "***" if k.lower() in ["authorization", "x-api-key"] else v for k, v in auth_headers.items()}
-            self.style_manager.logger.info(f"Using headers: {debug_headers}")
-            
-            # Create network request
-            request = QNetworkRequest(QUrl(styles_url))
-            
-            # Set timeout
-            request.setAttribute(QNetworkRequest.CacheLoadControlAttribute, QNetworkRequest.PreferNetwork)
-            
-            # Set headers
-            for header_name, header_value in auth_headers.items():
-                request.setRawHeader(
-                    QByteArray(header_name.encode()),
-                    QByteArray(str(header_value).encode())
+            # Check if layers are loaded
+            if not self.loaded_services:
+                self.iface.messageBar().pushMessage(
+                    "Warning",
+                    "No layers loaded. Please load layers first.",
+                    level=Qgis.Warning
                 )
+                return
+                
+            # Get hostname and port
+            hostname = self.get_config_hostname()
+            if not hostname:
+                self.iface.messageBar().pushMessage(
+                    "Error",
+                    "Hostname not configured. Please configure server settings first.",
+                    level=Qgis.Critical
+                )
+                return
+                
+            port = self.get_config_port()
             
-            # Make blocking request
-            nam = QgsNetworkAccessManager.instance()
-            reply = nam.blockingGet(request)
+            # Get authentication header
+            if not self.credential_manager:
+                self.credential_manager = CredentialManager(self.logger)
+                
+            auth_header = self.credential_manager.get_auth_header()
             
-            # Check if request was successful
-            if reply.error() == QNetworkReply.NoError:
-                try:
-                    # Parse JSON response
-                    response_text = bytes(reply.content()).decode('utf-8')
-                    styles_data = json.loads(response_text)
-                    
-                    # Count how many styles were in the JSON file
-                    total_styles = 0
-                    for service_id, service_styles in styles_data.get("styles", {}).items():
-                        total_styles += len(service_styles)
-                    
-                    success_count, fail_count = self.style_manager.import_styles_from_json(styles_data, self.loaded_services)
-                    
-                    # Construct message with more details
-                    if total_styles == 0:
-                        QMessageBox.warning(None, "Style Load Error","No styles found on server.")
-                    else:
-                        # Ensure we don't report more successes than available styles
-                        if success_count > total_styles:
-                            success_count = total_styles
-                        
-                        if success_count > 0:
-                            if success_count == total_styles:
-                                self.logger.info(f"Successfully applied all {success_count} styles from server.")
-                            else:
-                                self.logger.info(f"Applied {success_count} out of {total_styles} styles from server.")
-                                
-                                # If we know styles are being applied despite reporting failure:
-                                if fail_count > 0 and self._check_if_styles_visibly_applied():
-                                    QMessageBox.warning(None, "Style Load Error","Note: Some styles may show as failed in logs but were actually applied.")
-                        else:
-                            QMessageBox.information(None, "Style Application", f"Failed to apply any styles. No styles could be matched to loaded layers.")
-                    
-                except json.JSONDecodeError as e:
-                    self.style_manager.logger.error(f"Error parsing styles JSON from server: {str(e)}")
-                    QMessageBox.warning(None, "Style Load Error", "Failed to parse styles data from server.")
+            # Create progress dialog
+            self.iface.messageBar().pushMessage(
+                "Info",
+                "Loading styles from server... Please wait",
+                level=Qgis.Info
+            )
+            QgsApplication.processEvents()  # Keep UI responsive
+            
+            # Apply styles from server
+            success_count, fail_count = self.style_manager.apply_server_styles(
+                self.loaded_services, hostname, port, auth_header
+            )
+            
+            if success_count > 0 or fail_count > 0:
+                self.iface.messageBar().pushMessage(
+                    "Success" if fail_count == 0 else "Warning",
+                    f"Styles loaded: {success_count} success, {fail_count} failed",
+                    level=Qgis.Success if fail_count == 0 else Qgis.Warning
+                )
             else:
-                self.style_manager.logger.error(f"Failed to fetch styles. Error: {reply.errorString()}")
-                self.style_manager.logger.error(f"Error code: {reply.error()}")
-                QMessageBox.warning(None, "Style Load Error", f"Failed to fetch styles from server (Error: {reply.errorString()}).")
-                
+                self.iface.messageBar().pushMessage(
+                    "Warning",
+                    "No styles found on server or request failed",
+                    level=Qgis.Warning
+                )
         except Exception as e:
-            self.style_manager.logger.error(f"Error loading server styles: {str(e)}")
-            self.style_manager.logger.error(traceback.format_exc())
-            QMessageBox.warning(None, "Error", f"Failed to load styles: {str(e)}")
-
-    def _check_if_styles_visibly_applied(self):
-        """
-        Helper method to detect if styles were visibly applied despite reporting failures.
-        This is a simple placeholder - in a real implementation, you might check for specific
-        style properties that changed.
-        
-        Returns:
-            bool: True if styles appear to have been applied
-        """
-        # This is a simplistic implementation that always returns True
-        # In a real implementation, you might check specific properties of the layers
-        return True
-
+            self.logger.error(f"Error loading server styles: {str(e)}")
+            self.logger.error(traceback.format_exc())
+            self.iface.messageBar().pushMessage(
+                "Error",
+                f"Error loading server styles: {str(e)}",
+                level=Qgis.Critical
+            )
+            
     def show_version(self):
-        """Show the plugin version and other information."""
-        # Get plugin metadata
+        """Show plugin version information"""
+        QMessageBox.information(
+            self.iface.mainWindow(),
+            "Plugin Version",
+            f"WindScout Grunddaten Plugin\nCode Version: {PLUGIN_CODE_VERSION}\nGithub: https://github.com/GermanWindScout/renewable_basedata_plugin"
+        )
+        
+    def load_layers(self):
+        """Load layers from configuration using QGIS authentication system."""
         try:
-            with open(os.path.join(os.path.dirname(__file__), 'metadata.txt'), 'r') as f:
-                metadata_content = f.read()
+            # Check if layer filtering is enabled
+            settings = QgsSettings()
+            layer_filter = settings.value("ogc_layer_handler/layer_filter", "", type=str)
+            
+            # Create credential manager if not already created
+            if not self.credential_manager:
+                self.credential_manager = CredentialManager(self.logger)
                 
-            # Parse version from metadata
-            version_match = re.search(r'version=(.+)', metadata_content)
-            plugin_version = version_match.group(1) if version_match else "Unknown"
+            # Get authentication configuration ID
+            auth_config_id = self.credential_manager.get_auth_config_id()
             
-            # Get file modification time
-            plugin_path = __file__
-            mod_time = datetime.fromtimestamp(os.path.getmtime(plugin_path))
-            mod_time_str = mod_time.strftime("%Y-%m-%d %H:%M:%S")
+            # Get hostname and port
+            hostname = self.get_config_hostname()
+            if not hostname:
+                self.iface.messageBar().pushMessage(
+                    "Error", 
+                    "Server hostname not configured. Please configure server settings first.", 
+                    level=Qgis.Critical
+                )
+                return
+                
+            port = self.get_config_port()
+            if not port:
+                port = "443"
             
-            # Build message
-            message = f"""
-<b>WindScout Grunddaten Dienst Plugin</b>
-
-Plugin Version: {plugin_version}
-Code Version: {PLUGIN_CODE_VERSION}
-Last Modified: {mod_time_str}
-File: {os.path.basename(plugin_path)}
-
-Use this code version ID to verify which code is running.
-"""
+            # Set connection parameters for initial load or refresh
+            self.logger.info(f"Loading layers using hostname: {hostname}, port: {port}")
             
-            # Show dialog with version information
-            QMessageBox.information(None, "Plugin Information", message)
+            # Determine config_path - either from a QgsSettings parameter or from the plugin directory
+            config_path = settings.value("ogc_layer_handler/config_file_path", "")
+            
+            if not config_path:
+                self.logger.warning("No config path was determined, using default config path.")
+                # Use a default config path if none was determined
+                config_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'config.json')
+                
+                # If a default config exists, make sure its hostname is updated
+                if os.path.exists(config_path):
+                    try:
+                        with open(config_path, 'r') as f:
+                            config_json = json.load(f)
+                        
+                        # Override hostname and port with values from QGIS settings
+                        config_json['hostname'] = hostname
+                        config_json['port'] = port
+                        
+                        with open(config_path, 'w') as f:
+                            json.dump(config_json, f, indent=2)
+                            
+                        self.logger.info(f"Updated config.json with hostname: {hostname}, port: {port}")
+                    except Exception as e:
+                        self.logger.error(f"Error updating config.json: {str(e)}")
+                # If a default config doesn't exist, create one
+                else:
+                    try:
+                        # Create a default configuration
+                        minimal_config = {
+                            "hostname": hostname,
+                            "port": port,
+                            "services": {
+                                "external_services": {},
+                                "internal_services": {}
+                            },
+                            "styles": {},
+                            "layer_tree": []
+                        }
+                        
+                        with open(config_path, 'w') as f:
+                            json.dump(minimal_config, f, indent=2)
+                            
+                        self.logger.info(f"Created default config.json at {config_path}")
+                    except Exception as e:
+                        self.logger.error(f"Error creating default config.json: {str(e)}")
+                        
+                # Check if we can download a configuration from the server
+                try:
+                    protocol = "https"
+                    if hostname in ["localhost", "127.0.0.1"]:
+                        protocol = "http"
+                    
+                    config_url = f"{protocol}://{hostname}:{port}/qgis_config"
+                    self.logger.info(f"Attempting to download configuration from {config_url}")
+                    
+                    # Create a network request
+                    request = QNetworkRequest(QUrl(config_url))
+                    
+                    # Add authentication if available
+                    if auth_config_id:
+                        auth_manager = QgsApplication.authManager()
+                        auth_manager.updateNetworkRequest(request, auth_config_id)
+                    
+                    # Make blocking request
+                    nam = QgsNetworkAccessManager.instance()
+                    reply = nam.blockingGet(request)
+                    
+                    if reply.error() == QNetworkReply.NoError:
+                        # Parse JSON response
+                        response_text = bytes(reply.content()).decode('utf-8')
+                        config_json = json.loads(response_text)
+                        
+                        # Override hostname and port with values from QGIS settings
+                        config_json['hostname'] = hostname
+                        config_json['port'] = port
+                        
+                        # Save to config file
+                        with open(config_path, 'w') as f:
+                            json.dump(config_json, f, indent=2)
+                            
+                        self.logger.info(f"Downloaded and saved configuration from {config_url}")
+                    else:
+                        self.logger.warning(f"Failed to download configuration: {reply.errorString()}")
+                except Exception as e:
+                    self.logger.error(f"Error downloading configuration: {str(e)}")
+            
+            # Create layer handler with config path and authentication
+            self.layer_handler = LayerHandler(config_path, self.logger)
+            self.layer_handler.credential_manager = self.credential_manager
+            self.layer_handler.iface = self.iface
+            
+            # Override hostname and port in LayerHandler's config with values from QGIS settings
+            self.layer_handler.config['hostname'] = hostname
+            self.layer_handler.config['port'] = port
+            
+            # Set MetadataHandler's credential manager
+            self.layer_handler.metadata_handler.set_credential_manager(self.credential_manager)
+            
+            # Build the layer tree
+            self.logger.info("Building layer tree structure...")
+            self.layer_handler.build_layer_tree()
+            
+            # Store reference to layers for style management
+            self.loaded_services = self.layer_handler.layers_by_id
+            
+            # Optionally load styles from server
+            if settings.value("ogc_layer_handler/auto_load_styles", True, type=bool):
+                self.load_server_styles()
+                
+            self.iface.messageBar().pushMessage(
+                "Success", 
+                "Layers loaded successfully", 
+                level=Qgis.Success
+            )
             
         except Exception as e:
-            self.logger.error(f"Error displaying version: {str(e)}")
-            QMessageBox.information(None, "Plugin Version", f"Code Version: {PLUGIN_CODE_VERSION}")
+            self.logger.error(f"Error loading layers: {str(e)}")
+            self.logger.error(traceback.format_exc())
+            self.iface.messageBar().pushMessage(
+                "Error", 
+                f"Error loading layers: {str(e)}", 
+                level=Qgis.Critical
+            )
+
+    def unload(self):
+        """Removes the plugin menu items and icons from QGIS GUI."""
+        # Remove the plugin menu items and icons
+        self.iface.removePluginWebMenu(f'&{self.title}', self.load_action)
+        # self.iface.removePluginWebMenu(f'&{self.title}', self.refresh_action)
+        # self.iface.removePluginWebMenu(f'&{self.title}', self.check_tinyows_action)
+        self.iface.removePluginWebMenu(f'&{self.title}', self.configure_action)
+        self.iface.removePluginWebMenu(f'&{self.title}', self.test_auth_action)
+        # self.iface.removePluginWebMenu(f'&{self.title}', self.test_direct_action)
+        self.iface.removePluginWebMenu(f'&{self.title}', self.export_styles_action)
+        self.iface.removePluginWebMenu(f'&{self.title}', self.import_styles_action)
+        self.iface.removePluginWebMenu(f'&{self.title}', self.load_server_styles_action)
+        self.iface.removePluginWebMenu(f'&{self.title}', self.version_action)
+        
+        # Remove the toolbar
+        if hasattr(self, 'toolbar'):
+            del self.toolbar
