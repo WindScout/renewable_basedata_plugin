@@ -1,0 +1,4 @@
+credentials.json
+*.log
+__pycache__/**
+profiles/**
