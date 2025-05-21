@@ -3,7 +3,7 @@
 # Script to zip the content of qgis_plugin directory at the last git commit and ensure credentials.json is included
 
 # Set variables
-PLUGIN_DIR="plugin"
+PLUGIN_DIR="windscout_grunddaten"
 OUTPUT_ZIP="$(pwd)/windscout_grunddaten.zip"
 TEMP_DIR=$(mktemp -d)
 NEW_DIR_NAME="windscout_grunddaten"
