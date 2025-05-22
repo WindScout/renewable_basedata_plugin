@@ -46,7 +46,6 @@ from qgis.core import (
     QgsDataSourceUri,
     QgsMapLayer,
     QgsNetworkAccessManager,
-    QgsNetworkReplyContent,
 )
 
 import hashlib
@@ -56,7 +55,7 @@ import pstats
 import io
 import concurrent.futures
 
-from .tools import LayerHandler, setup_logging, CredentialManager
+from .tools import setup_logging, CredentialManager
 
 # --- PLUGIN_CODE_VERSION calculation updated to include all local code files ---
 def _get_combined_code_hash():
@@ -115,83 +114,8 @@ class MetadataHandler:
         """
         self.credential_manager = credential_manager
 
-    def fetch_tinyows_metadata(self, collection_id: str) -> Optional[Dict]:
-        """
-        Fetch metadata for TinyOWS layers.
-        
-        Args:
-            collection_id: Collection ID
-            
-        Returns:
-            Dict: Metadata or None if request failed
-        """
-        try:
-            # Get hostname and port from QgsSettings first, falling back to config
-            settings = QgsSettings()
-            hostname = settings.value("ogc_layer_handler/config_hostname")
-            port = settings.value("ogc_layer_handler/config_port")
-            
-            # If not found in settings, use values from config
-            if not hostname:
-                hostname = self.config.get('hostname', 'localhost')
-            
-            if not port:
-                port = self.config.get('port', 443)
-                
-            if hostname in ['127.0.0.1', 'localhost']:
-                protocol = 'http'
-            else:
-                protocol = 'https'
-                port = '443'
-            # Capabilities URL for specific layer
-            capabilities_url = (
-                f"{protocol}://{hostname}:{port}/tinyows?"
-                f"service=WFS&"
-                f"version=1.1.0&"
-                f"request=DescribeFeatureType&"
-                f"typename={collection_id}"
-            )
-            
-            # Create network request
-            request = QNetworkRequest(QUrl(capabilities_url))
-            
-            # Get authentication header if credential manager is set
-            if self.credential_manager:
-                auth_header = self.credential_manager.get_auth_header()
-                if auth_header:
-                    for header_name, header_value in auth_header.items():
-                        request.setRawHeader(
-                            QByteArray(header_name.encode()),
-                            QByteArray(str(header_value).encode())
-                        )
-                
-                # Also apply authentication configuration if available
-                auth_config_id = self.credential_manager.get_auth_config_id()
-                if auth_config_id:
-                    auth_manager = QgsApplication.authManager()
-                    auth_manager.updateNetworkRequest(request, auth_config_id)
-            
-            # Make blocking request
-            nam = QgsNetworkAccessManager.instance()
-            reply = nam.blockingGet(request)
-            
-            # Check if request was successful
-            if reply.error() == QNetworkReply.NoError:
-                # TinyOWS returns XML schema, but we can extract basic info
-                return {
-                    'id': collection_id,
-                    'title': f"TinyOWS Layer: {collection_id}",
-                    'description': f"WFS layer from TinyOWS service"
-                }
-            else:
-                self.logger.warning(f"Failed to fetch metadata for collection {collection_id}: {reply.errorString()}")
-                
-        except Exception as e:
-            self.logger.error(f"Error fetching TinyOWS metadata: {str(e)}")
-            
-        return None
-
-    def fetch_external_metadata(self, service_config: Dict, collection_id: str) -> Optional[Dict]:
+ 
+    def fetch_metadata(self, service_config: Dict, collection_id: str) -> Optional[Dict]:
         """
         Fetch metadata from external WFS service through the proxy.
         
@@ -466,16 +390,9 @@ class MetadataHandler:
                 
                 return metadata
             
-            # Check if it's an internal TinyOWS service
-            if service_config.get('is_internal', False):
-                internal_metadata = self.fetch_tinyows_metadata(collection_id)
-                if internal_metadata:
-                    return internal_metadata
-            # Otherwise try external metadata
-            else:
-                external_metadata = self.fetch_external_metadata(service_config, collection_id)
-                if external_metadata:
-                    return external_metadata
+            metadata = self.fetch_metadata(service_config, collection_id)
+            if metadata:
+                return metadata
         
         # Return a minimal default metadata
         return {

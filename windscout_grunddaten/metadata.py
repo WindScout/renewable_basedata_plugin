@@ -81,23 +81,7 @@ class MetadataHandler:
     def set_credential_manager(self, credential_manager):
         """Set credential manager for authenticated requests"""
         self.credential_manager = credential_manager
-        
-    def get_layer_metadata(self, service_id: str, layer_id: str) -> Optional[Dict]:
-        """Get metadata for layer with caching"""
-        cache_key = f"{service_id}_{layer_id}"
-        
-        # Check cache first
-        metadata = self.cache.get(cache_key)
-        if metadata:
-            return metadata
-            
-        # Get from config or fetch from service
-        metadata = self.get_layer_metadata_from_config(service_id, layer_id)
-        if metadata:
-            self.cache.set(cache_key, metadata)
-            
-        return metadata
-        
+                
     def apply_metadata_to_layer(self, layer, service_config=None, layer_config=None):
         """Apply metadata to layer with optimizations"""
         if not layer or not layer.isValid():
