@@ -1,4 +1,4 @@
-from qgis.core import QgsLayerMetadata, QgsBox3d, QgsDateTimeRange
+from qgis.core import QgsLayerMetadata, QgsBox3d, QgsDateTimeRange, QgsProject, QgsMapLayer
 import os
 import json
 import logging
@@ -87,8 +87,17 @@ class MetadataHandler:
         if not layer or not layer.isValid():
             return
             
-        # For invisible layers during initial load, just store metadata info
-        if not layer.isVisible():
+        # Check if metadata loading should be deferred
+        should_defer = False
+        if isinstance(layer, QgsMapLayer) and layer.customProperty('defer_metadata'):
+            should_defer = True
+        else:
+            # Check if the layer is not yet in the layer tree
+            root = QgsProject.instance().layerTreeRoot()
+            node = root.findLayer(layer.id()) if hasattr(layer, 'id') else None
+            should_defer = not node
+        
+        if should_defer:
             layer.setCustomProperty('pending_metadata', json.dumps({
                 'service_config': service_config,
                 'layer_config': layer_config
